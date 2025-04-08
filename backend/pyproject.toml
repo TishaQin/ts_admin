@@ -20,6 +20,12 @@ django-storages = "^1.14.6"
 python-magic = "^0.4.27"
 django-ninja-jwt = "^5.3.5"
 django-ninja-extra = "^0.22.6"
+pillow = "^11.1.0"
+django-ratelimit = "^4.1.0"
+httpx = "^0.28.1"
+jmespath = "^1.0.1"
+psycopg2-binary = "^2.9.10"
+django-taggit = "^6.1.0"
 
 
 [tool.poetry.group.dev.dependencies]

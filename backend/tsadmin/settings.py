@@ -9,9 +9,13 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-
-from datetime import timedelta
+import os
 from pathlib import Path
+from dotenv import load_dotenv
+from django.utils.log import RequireDebugFalse, RequireDebugTrue
+
+# 加载环境变量
+load_dotenv()
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -21,12 +25,14 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-4%e^#z4vu-9l4e1-++@-47%rd84m%zdsx0ibm^chjfe*h6rnz9"
+SECRET_KEY = os.getenv(
+    "SECRET_KEY", "django-insecure-4%e^#z4vu-9l4e1-++@-47%rd84m%zdsx0ibm^chjfe*h6rnz9"
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG")
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS").split(",")
 
 
 # Application definition
@@ -45,10 +51,20 @@ INSTALLED_APPS = [
     "ninja",  # django-ninja
     "ninja_extra",  # django-ninja-extra
     "ninja_jwt",  # django-ninja-jwt
+    "taggit",  # Taggit
     # 自定义应用
-    "apps.system",
     "apps.business",
+    "apps.system",
+    "apps.engine",
+    
 ]
+
+# IP白名单
+IP_WHITELIST = os.getenv("IP_WHITELIST").split(",")
+
+# 频率限制配置
+RATELIMIT_ENABLE = True
+RATELIMIT_RATE = os.getenv("RATELIMIT_RATE", "30/h")  # 默认每小时100次请求
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
@@ -59,7 +75,10 @@ MIDDLEWARE = [
     "django.contrib.auth.middleware.AuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "utils.fu_logger.FuLoggerMiddleware",  # 日志处理中间件
+    "tsadmin.utils.fu_logger.FuLoggerMiddleware",  # 日志处理中间件
+    # "tsadmin.utils.fu_middleware.IPWhitelistMiddleware",  # IP白名单中间件
+    # "tsadmin.utils.fu_middleware.RateLimitMiddleware",  # 请求频率限制中间件
+    "tsadmin.utils.fu_currentuser.CurrentUserMiddleware",  # 当前用户中间件
 ]
 
 ROOT_URLCONF = "tsadmin.urls"
@@ -82,12 +101,12 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "tsadmin.wsgi.application"
 
-# 添加 Django Ninja 配置
+# 添加  Ninja JWT 配置
 NINJA_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
+    "ACCESS_TOKEN_LIFETIME": int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "60")),
+    "REFRESH_TOKEN_LIFETIME": int(os.getenv("JWT_REFRESH_TOKEN_EXPIRE_DAYS", "7")),
     "ROTATE_REFRESH_TOKENS": False,
-    "ALGORITHM": "HS256",
+    "ALGORITHM": os.getenv("JWT_ALGORITHM", "HS256"),
     "SIGNING_KEY": SECRET_KEY,
     "AUTH_HEADER_TYPES": ("Bearer",),
 }
@@ -107,11 +126,42 @@ AUTH_USER_MODEL = "system.User"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": os.getenv("DB_ENGINE", "django.db.backends.mysql"),
+        "NAME": os.getenv("DB_NAME", "tsadmin"),
+        "USER": os.getenv("DB_USER", "root"),
+        "PASSWORD": os.getenv("DB_PASSWORD", ""),
+        "HOST": os.getenv("DB_HOST", "localhost"),
+        "PORT": os.getenv("DB_PORT", "3306"),
     }
 }
 
+# Redis配置
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB = int(os.getenv("REDIS_DB", "0"))
+REDIS_PASSWORD = os.getenv("REDIS_PASSWORD", "")
+
+# 缓存配置
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "PASSWORD": REDIS_PASSWORD,
+            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+        },
+    }
+}
+
+# Celery配置
+CELERY_BROKER_URL = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+CELERY_RESULT_BACKEND = f"redis://{REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+CELERY_ACCEPT_CONTENT = ["json"]
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_TIMEZONE = "Asia/Shanghai"
+CELERY_ENABLE_UTC = False
 
 # Password validation
 # https://docs.djangoproject.com/en/5.1/ref/settings/#auth-password-validators
@@ -168,6 +218,52 @@ FU_API_MODULE_MAP = {
 }
 
 # 日志配置
+# LOGGING = {
+#     "version": 1,
+#     "disable_existing_loggers": False,
+#     "formatters": {
+#         "verbose": {
+#             "format": "{asctime} [{levelname}] {module}.{funcName}:{lineno} - {message}",
+#             "style": "{",
+#         },
+#     },
+#     "handlers": {
+#         "console": {
+#             "level": "INFO",
+#             "class": "logging.StreamHandler",
+#             "formatter": "verbose",
+#         },
+#         "api_file": {
+#             "level": "INFO",
+#             "class": "logging.handlers.RotatingFileHandler",
+#             "filename": os.path.join(BASE_DIR, "logs/api.log"),
+#             "maxBytes": 10 * 1024 * 1024,  # 10 MB
+#             "backupCount": 10,
+#             "formatter": "verbose",
+#         },
+#         "error_file": {
+#             "level": "ERROR",
+#             "class": "logging.handlers.RotatingFileHandler",
+#             "filename": os.path.join(BASE_DIR, "logs/error.log"),
+#             "maxBytes": 10 * 1024 * 1024,  # 10 MB
+#             "backupCount": 10,
+#             "formatter": "verbose",
+#         },
+#     },
+#     "loggers": {
+#         "api": {
+#             "handlers": ["console", "api_file"],
+#             "level": "INFO",
+#             "propagate": False,
+#         },
+#         "error": {
+#             "handlers": ["console", "error_file"],
+#             "level": "ERROR",
+#             "propagate": False,
+#         },
+#     },
+# }
+# 日志配置
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -176,27 +272,85 @@ LOGGING = {
             "format": "{asctime} [{levelname}] {module}.{funcName}:{lineno} - {message}",
             "style": "{",
         },
+        "simple": {
+            "format": "{levelname} {message}",
+            "style": "{",
+        },
+    },
+    "filters": {
+        # 开发环境过滤器
+        "require_debug_true": {
+            "()": RequireDebugTrue,
+        },
+        # 生产环境过滤器
+        "require_debug_false": {
+            "()": RequireDebugFalse,
+        },
+        # 自定义警告过滤器
+        "suppress_dev_warnings": {
+            "()": "django.utils.log.CallbackFilter",
+            "callback": lambda record: not (
+                "development server" in record.getMessage().lower() or 
+                "you have 18 unapplied migration" in record.getMessage().lower()
+            )
+        }
     },
     "handlers": {
         "console": {
             "level": "INFO",
             "class": "logging.StreamHandler",
-            "formatter": "verbose",
+            "formatter": "simple",
+            "filters": ["suppress_dev_warnings", "require_debug_true"],
         },
         "api_file": {
             "level": "INFO",
-            "class": "logging.handlers.RotatingFileHandler",
-            "filename": "logs/api.log",
-            "maxBytes": 10 * 1024 * 1024,  # 10 MB
-            "backupCount": 10,
+            "class": "logging.handlers.TimedRotatingFileHandler",  # 改为按时间轮转
+            "filename": os.path.join(BASE_DIR, "logs/api.log"),
+            "when": "midnight",
+            "backupCount": 30,
             "formatter": "verbose",
+            "filters": ["require_debug_false"],
+        },
+        "error_file": {
+            "level": "WARNING",  # 调整为捕获WARNING及以上级别
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(BASE_DIR, "logs/error.log"),
+            "maxBytes": 20 * 1024 * 1024,  # 20 MB
+            "backupCount": 15,
+            "formatter": "verbose",
+            "filters": ["require_debug_false"],
+        },
+        "debug_file": {
+            "level": "DEBUG",
+            "class": "logging.handlers.RotatingFileHandler",
+            "filename": os.path.join(BASE_DIR, "logs/debug.log"),
+            "maxBytes": 10 * 1024 * 1024,
+            "backupCount": 5,
+            "formatter": "verbose",
+            "filters": ["require_debug_true"],
         },
     },
     "loggers": {
-        "api": {
-            "handlers": ["console", "api_file"],
+        "django": {
+            "handlers": ["console", "error_file", "debug_file"],
             "level": "INFO",
             "propagate": False,
         },
+        "api": {
+            "handlers": ["api_file", "error_file"],
+            "level": "DEBUG",
+            "propagate": False,
+        },
+        # 添加安全日志记录
+        "django.security": {
+            "handlers": ["error_file"],
+            "level": "WARNING",
+            "propagate": False,
+        },
     },
+    # 添加根记录器
+    "root": {
+        "handlers": ["console", "debug_file"],
+        "level": "WARNING",
+    }
 }
